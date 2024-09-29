@@ -437,14 +437,21 @@ func (is *indexSearch) getStreamIDsForTagRegexp(tenantID TenantID, tagName strin
 	return ids
 }
 
+// Extra note: this function registers a streamID and its corresponding streamTagsCanonical to the indexdb
 func (idb *indexdb) mustRegisterStream(streamID *streamID, streamTagsCanonical []byte) {
+	// Extra note: unmarshal the streamTagsCanonical into a StreamTags object
 	st := GetStreamTags()
 	mustUnmarshalStreamTags(st, streamTagsCanonical)
 	tenantID := streamID.tenantID
 
+	// Extra note: batch items is to store the items to be added to the indexdb
 	bi := getBatchItems()
 	buf := bi.buf[:0]
 	items := bi.items[:0]
+
+	// Extra note:
+	// Each type of item has its own prefix
+	// TODO: explain the purpose of each item added to the indexdb
 
 	// Register tenantID:streamID entry.
 	bufLen := len(buf)

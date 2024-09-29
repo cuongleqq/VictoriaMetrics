@@ -121,6 +121,7 @@ type Table struct {
 	partsLock sync.Mutex
 
 	// inmemoryParts contains inmemory parts, which are visible for search.
+	// Extra note: inmemoryParts are periodically flushed to fileParts
 	inmemoryParts []*partWrapper
 
 	// fileParts contains file-backed parts, which are visible for search.
@@ -180,8 +181,13 @@ func (riss *rawItemsShards) addItems(tb *Table, items [][]byte) {
 	shards := riss.shards
 	shardsLen := uint32(len(shards))
 	for len(items) > 0 {
+		// Extra note: on multi-core systems, addItems is called concurrently by multiple cores
+		// riss.shardIdx.Add(1) increments the shard index by 1, so each core will add items to a different shard
 		n := riss.shardIdx.Add(1)
 		idx := n % shardsLen
+		// Extra note:
+		// tailItems is the items that are not added to the current shard
+		// ibsToFlush is the inmemoryBlocks that should be flushed to the file-backed parts
 		tailItems, ibsToFlush := shards[idx].addItems(items)
 		riss.addIbsToFlush(tb, ibsToFlush)
 		items = tailItems
@@ -200,6 +206,10 @@ func (riss *rawItemsShards) addIbsToFlush(tb *Table, ibsToFlush []*inmemoryBlock
 		riss.updateFlushDeadline()
 	}
 	riss.ibsToFlush = append(riss.ibsToFlush, ibsToFlush...)
+	// Extra note:
+	// If the number of ibs in riss.ibsToFlush is too many	,
+	// then flush blocks to inmemoryParts right away
+	// instead of waiting for the next flush deadline
 	if len(riss.ibsToFlush) >= maxBlocksPerShard*cgroup.AvailableCPUs() {
 		ibsToMerge = riss.ibsToFlush
 		riss.ibsToFlush = nil
@@ -259,9 +269,16 @@ func (ris *rawItemsShard) addItems(items [][]byte) ([][]byte, []*inmemoryBlock) 
 	}
 	ib := ibs[len(ibs)-1]
 	for i, item := range items {
+		// Extra note: ib.Add(item) returns false if the item is too long to add to the inmemoryBlock
 		if ib.Add(item) {
 			continue
 		}
+		// Extra note:
+		// There are 2 ways to proceed:
+		// 1. If the shard is full of ibs, return the ibs to flush,
+		//    and leave the rest of items for the next shard
+		// 2. If the shard is not full yet, create a new inmemoryBlock and add the item to it
+
 		if len(ibs) >= maxBlocksPerShard {
 			ibsToFlush = append(ibsToFlush, ibs...)
 			ibs = make([]*inmemoryBlock, 0, maxBlocksPerShard)
@@ -274,6 +291,7 @@ func (ris *rawItemsShard) addItems(items [][]byte) ([][]byte, []*inmemoryBlock) 
 			continue
 		}
 
+		// Extra note: at this moment, the item is too long to add to the inmemoryBlock
 		// Skip too long item
 		itemPrefix := item
 		if len(itemPrefix) > 128 {
@@ -842,11 +860,14 @@ func (tb *Table) flushBlocksToInmemoryParts(ibs []*inmemoryBlock, isFinal bool) 
 	pws := make([]*partWrapper, 0, (len(ibs)+defaultPartsToMerge-1)/defaultPartsToMerge)
 	wg := getWaitGroup()
 	for len(ibs) > 0 {
+		// Extra note: in case of ibs left is less than defaultPartsToMerge,
+		// then merge all the left ibs to a single inmemoryPart
 		n := defaultPartsToMerge
 		if n > len(ibs) {
 			n = len(ibs)
 		}
 		wg.Add(1)
+		// Extra note: limit the number of inmemoryPartsConcurrencyCh to the amount of available CPU cores
 		inmemoryPartsConcurrencyCh <- struct{}{}
 		go func(ibsChunk []*inmemoryBlock) {
 			defer func() {
@@ -863,8 +884,8 @@ func (tb *Table) flushBlocksToInmemoryParts(ibs []*inmemoryBlock, isFinal bool) 
 			for i := range ibsChunk {
 				ibsChunk[i] = nil
 			}
-		}(ibs[:n])
-		ibs = ibs[n:]
+		}(ibs[:n]) // Extra note: pass the next ibs chunk to the goroutine
+		ibs = ibs[n:] // Extra note: remove the processed ibs chunk from the ibs
 	}
 	wg.Wait()
 	putWaitGroup(wg)

@@ -126,6 +126,12 @@ func (lr *LogRows) NeedFlush() bool {
 //
 // field names longer than MaxFieldNameSize are automatically truncated to MaxFieldNameSize length.
 func (lr *LogRows) MustAdd(tenantID TenantID, timestamp int64, fields []Field) {
+	// Extra note
+	// This section compute the streamID,
+	// which made from tenantID and a hash of streamTagsCanonical
+	// streamTagsCanonical is just a way to group the stream tags
+	// and make it easier for query engine to query the stream
+
 	// Compose StreamTags from fields according to lr.streamFields
 	sfs := lr.streamFields
 	st := GetStreamTags()
@@ -146,12 +152,30 @@ func (lr *LogRows) MustAdd(tenantID TenantID, timestamp int64, fields []Field) {
 	sid.tenantID = tenantID
 	sid.id = hash128(bb.B)
 
+	// Extra note:
+	// bb.B hold the streamTagsCanonical
 	// Store the row
 	lr.mustAddInternal(sid, timestamp, fields, bb.B)
 	bbPool.Put(bb)
 }
 
 func (lr *LogRows) mustAddInternal(sid streamID, timestamp int64, fields []Field, streamTagsCanonical []byte) {
+	// Extra note:
+	// This section store the streamTagsCanonical to streamTagsCanonicals
+	// and store the streamID to streamIDs
+	// and store the timestamp to timestamps
+	// and all sorted fields to row
+
+	// this section uses buf and fieldsBuf to store data.
+	// buf and fieldsBuf are if logrows, which is from a pool
+	// so the memory for them might already be allocated
+	// by adding data to buf and fieldsBuf, the allocated memory is reused
+	// then we just need to take that data and reuse for fields
+
+	// This section also uses ToUnsafeString
+	// ToUnsafeString is a helper function to convert a slice of bytes to a string
+	// Doing this save the memory allocation for the string
+
 	buf := lr.buf
 	bufLen := len(buf)
 	buf = append(buf, streamTagsCanonical...)

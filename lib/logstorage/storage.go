@@ -233,6 +233,8 @@ func MustOpenStorage(path string, cfg *StorageConfig) *Storage {
 		minFreeDiskSpaceBytes = uint64(cfg.MinFreeDiskSpaceBytes)
 	}
 
+	// Extra note:
+	// This just creates the storage and the partitions directory
 	if !fs.IsPathExist(path) {
 		mustCreateStorage(path)
 	}
@@ -262,6 +264,10 @@ func MustOpenStorage(path string, cfg *StorageConfig) *Storage {
 		filterStreamCache: filterStreamCache,
 	}
 
+	// Extra note:
+	// This part creates the partitions directory and reads all the partitions
+	// Each partition is wrapped in a partitionWrapper
+	// and then it sorts them by day
 	partitionsPath := filepath.Join(path, partitionsDirname)
 	fs.MustMkdirIfNotExist(partitionsPath)
 	des := fs.MustReadDir(partitionsPath)
@@ -494,6 +500,8 @@ func (s *Storage) MustAddRows(lr *LogRows) {
 		ptwHot.decRef()
 	}
 
+	// Extra note:
+	// This part groups the rows by the day
 	// Slow path - rows cannot be added to the hot partition, so split rows among available partitions
 	minAllowedDay := s.getMinAllowedDay()
 	maxAllowedDay := s.getMaxAllowedDay()
@@ -551,6 +559,8 @@ func (tf *TimeFormatter) String() string {
 func (s *Storage) getPartitionForDay(day int64) *partitionWrapper {
 	s.partitionsLock.Lock()
 
+	// Extra note:
+	// After searching, n is the index of the first partition that has day >= day
 	// Search for the partition using binary search
 	ptws := s.partitions
 	n := sort.Search(len(ptws), func(i int) bool {
@@ -563,6 +573,10 @@ func (s *Storage) getPartitionForDay(day int64) *partitionWrapper {
 			ptw = nil
 		}
 	}
+
+	// Extra note:
+	// If n is equal to the length of ptws, then there is no partition that has day >= day
+	// If n is less than the length of ptws, but ptws[n].day != day, then we need to create a new partition and insert it into the list
 	if ptw == nil {
 		// Missing partition for the given day. Create it.
 		fname := time.Unix(0, day*nsecsPerDay).UTC().Format(partitionNameFormat)

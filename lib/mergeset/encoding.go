@@ -60,6 +60,9 @@ func (ib *inmemoryBlock) Swap(i, j int) {
 	items[i], items[j] = items[j], items[i]
 }
 
+// Extra note:
+// inmemoryBlock stores all items into a single slice of bytes
+// it uses []Item to denote the start and end offset of each item in the data slice
 type inmemoryBlock struct {
 	// commonPrefix contains common prefix for all the items stored in the inmemoryBlock
 	commonPrefix []byte
@@ -114,6 +117,7 @@ func (ib *inmemoryBlock) updateCommonPrefixSorted() {
 }
 
 func (ib *inmemoryBlock) updateCommonPrefixUnsorted() {
+	// Extra note: reset the commonPrefix, keep the memory allocation
 	ib.commonPrefix = ib.commonPrefix[:0]
 	items := ib.items
 	if len(items) == 0 {

@@ -103,6 +103,10 @@ func mustClosePartition(pt *partition) {
 
 func (pt *partition) mustAddRows(lr *LogRows) {
 	// Register rows in indexdb
+
+	// Extra note:
+	// This part finds streamIDs that are not in the cache and add them to pendingRows
+	// pendingRows is a list of indices of rows in lr that have streamIDs not in the cache
 	var pendingRows []int
 	streamIDs := lr.streamIDs
 	for i := range lr.timestamps {
@@ -114,20 +118,27 @@ func (pt *partition) mustAddRows(lr *LogRows) {
 			pendingRows = append(pendingRows, i)
 		}
 	}
+
 	if len(pendingRows) > 0 {
 		logNewStreams := pt.s.logNewStreams
 		streamTagsCanonicals := lr.streamTagsCanonicals
+		// Extra note:
+		// This part sorts the pendingRows by streamIDs
 		sort.Slice(pendingRows, func(i, j int) bool {
 			return streamIDs[pendingRows[i]].less(&streamIDs[pendingRows[j]])
 		})
+
 		for i, rowIdx := range pendingRows {
 			streamID := &streamIDs[rowIdx]
+			// Extra note: ignore the duplicate streamIDs
 			if i > 0 && streamIDs[pendingRows[i-1]].equal(streamID) {
 				continue
 			}
+			// Extra note: if the streamID is already in the cache (already registered), skip it
 			if pt.hasStreamIDInCache(streamID) {
 				continue
 			}
+			// Extra note: if the streamID is not in the indexdb, register it
 			if !pt.idb.hasStreamID(streamID) {
 				streamTagsCanonical := streamTagsCanonicals[rowIdx]
 				pt.idb.mustRegisterStream(streamID, streamTagsCanonical)
