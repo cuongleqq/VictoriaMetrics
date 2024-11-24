@@ -114,6 +114,7 @@ again:
 	default:
 	}
 
+	// Extra note: get the smallest item from the heap
 	bsr := bsm.bsrHeap[0]
 
 	var nextItem string

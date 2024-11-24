@@ -269,6 +269,8 @@ func (ib *inmemoryBlock) marshalData(sb *storageBlock, firstItemDst, commonPrefi
 	}
 
 	data := ib.data
+
+	// Extra note: marshal the first item and the common prefix
 	firstItem := ib.items[0].Bytes(data)
 	firstItemDst = append(firstItemDst, firstItem...)
 	commonPrefixDst = append(commonPrefixDst, ib.commonPrefix...)
@@ -279,6 +281,7 @@ func (ib *inmemoryBlock) marshalData(sb *storageBlock, firstItemDst, commonPrefi
 		return firstItemDst, commonPrefixDst, uint32(len(ib.items)), marshalTypePlain
 	}
 
+	// Extra note: prepare buffers for items data and lens data
 	bbItems := bbPool.Get()
 	bItems := bbItems.B[:0]
 
@@ -290,13 +293,23 @@ func (ib *inmemoryBlock) marshalData(sb *storageBlock, firstItemDst, commonPrefi
 	defer encoding.PutUint64s(xs)
 
 	cpLen := len(ib.commonPrefix)
+	// Extra note: prevItem is the previous item after removing the common prefix with the item right before it
 	prevItem := firstItem[cpLen:]
 	prevPrefixLen := uint64(0)
 	for i, it := range ib.items[1:] {
+		// Extra note: adjust the start offset to remove the common prefix from the item
 		it.Start += uint32(cpLen)
 		item := it.Bytes(data)
+		// Extra note: if the current item has even more extra common prefix with the previous item
+		// (except for the common prefix of the whole block)
+		// then remove that extra common prefix from the current item
 		prefixLen := uint64(commonPrefixLen(prevItem, item))
 		bItems = append(bItems, item[prefixLen:]...)
+		// Extra note: we need a way to store the extra common prefix length
+		// so we can decode the items data later
+		// that's why we store prefixLen
+		// the XOR of the prefixLen and the previous prefixLen is to make more zeroes in the encoded data
+		// this will make the encoded data more compressible using the ZSTD algorithm
 		xLen := prefixLen ^ prevPrefixLen
 		prevItem = item
 		prevPrefixLen = prefixLen
@@ -319,6 +332,11 @@ func (ib *inmemoryBlock) marshalData(sb *storageBlock, firstItemDst, commonPrefi
 		xs.A[i] = xLen
 	}
 	bLens = encoding.MarshalVarUint64s(bLens, xs.A)
+
+	// Extra note:
+	// At this point, bLens contains 2 slices of data:
+	// - the prefix length info of each item
+	// - the lens of each item
 	sb.lensData = encoding.CompressZSTDLevel(sb.lensData[:0], bLens, compressLevel)
 
 	bbLens.B = bLens
@@ -474,6 +492,9 @@ func (ib *inmemoryBlock) marshalDataPlain(sb *storageBlock) {
 	cpLen := len(ib.commonPrefix)
 	b := sb.itemsData[:0]
 	for _, it := range ib.items[1:] {
+		// Extra note: by adjusting the start offset of each item by the length of the commonPrefix,
+		// the appended item is shorten by remove the common Prefix from each item
+		// so this will save each some prefix bytes for each item
 		it.Start += uint32(cpLen)
 		b = append(b, it.String(data)...)
 	}
